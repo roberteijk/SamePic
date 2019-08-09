@@ -1,6 +1,13 @@
+// TODO Fix: ExamplePic path en SearchPic path may not be the same.
+
 package net.vandeneijk;
 
 import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.Insets;
@@ -11,6 +18,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
 import javafx.scene.image.Image;
@@ -20,34 +28,59 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.StackPane;
 import javafx.scene.text.TextAlignment;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import javafx.scene.Cursor;
 
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.*;
 import java.awt.*;
 import java.io.File;
 import java.net.MalformedURLException;
-import java.net.URL;
+import java.util.List;
 
 
 public class Gui extends Application {
 
-    private static TreeItem<String> mTiRoot;
-    private boolean mExampleTextFieldValid = false;
-    private boolean mSearchTextFieldValid = false;
-    private Button mBtnStartStop;
-    private TextField mTfExamplePath;
-    private TextField mTfSearchPath;
-    private Button mBtnExampleFile;
-    private Button mBtnExampleFolder;
-    private Button mBtnSearchFolder;
-    private Button mBtnClear;
-    private CheckBox mCbxTraverseExamplePath;
-    private CheckBox mCbxTraverseSearchPath;
-    private CheckBox mCbxDuplicatesWithoutExample;
+    private static final double TEXT_FIELD_HEIGHT = 25;
 
+    private static TreeItem<PicData> mTiRoot;
     private static boolean sProcessingActivated = false;
+    private static List<List<PicData>> sPicDataListList;
+    private static boolean sContainsExample;
+    private static List<PicData> sTreeItemIndex;
+    private static Map<PicData, TreeItem<PicData>> mTvHelperMapping;
+    private static ProgressBar sPbPleaseWaitAnimation;
+    private static Label sLblStatusBar;
+    private static GridPane sGpStatusBar;
+    private static Scene primaryScene;
+
+    private static boolean mExampleTextFieldValid = false;
+    private static boolean mSearchTextFieldValid = false;
+    private static Button mBtnStartStop;
+    private static TextField mTfExamplePath;
+    private static TextField mTfSearchPath;
+    private static Button mBtnExampleFile;
+    private static Button mBtnExampleFolder;
+    private static Button mBtnSearchFolder;
+    private static Button mBtnClear;
+    private static CheckBox mCbxTraverseExamplePath;
+    private static CheckBox mCbxTraverseSearchPath;
+    private static CheckBox mCbxDuplicatesWithoutExample;
+    private static ComboBox<String> mCbAccuracy;
+    private Button mBtnApplyChanges;
+    private Label mLblApplyChangesCounter;
+    private TreeView<PicData> mTvResults;
+    private FlowPane mFlwpThumbnails;
+    private Map<String, Integer> mAccuracyMap = new TreeMap<>(Collections.reverseOrder());
+    private double mSceneToPrimaryStageDifferenceWidth;
+    private double mSceneToPrimaryStageDifferenceHeight;
+
+
 
     public void startGui() {
         Application.launch();
@@ -64,6 +97,8 @@ public class Gui extends Application {
 
         final double DEFAULT_INSERTS = 10;
         final Insets DEFAULT_PADDING = new Insets(DEFAULT_INSERTS,DEFAULT_INSERTS,DEFAULT_INSERTS,DEFAULT_INSERTS);
+        final Insets DEFAULT_PADDING_WITHOUT_LEFT_AND_HALF_RIGHT = new Insets(DEFAULT_INSERTS,DEFAULT_INSERTS / 2,DEFAULT_INSERTS,0);
+        final Insets DEFAULT_PADDING_HALF_LEFT = new Insets(DEFAULT_INSERTS,DEFAULT_INSERTS ,DEFAULT_INSERTS,DEFAULT_INSERTS / 2);
         final Insets DEFAULT_PADDING_WITHOUT_TOP_BOTTOM = new Insets(0,DEFAULT_INSERTS,0,DEFAULT_INSERTS);
         final double SCENE_WIDTH = 1024;
         final double SCENE_HEIGHT = 768;
@@ -72,6 +107,16 @@ public class Gui extends Application {
         final double BUTTON_H_GAP = 5;
         final double TEXT_FIELD_HEIGHT = 25;
         final double V_GAP = 10;
+
+        mAccuracyMap.put("Accuracy 100,0%", 0);
+        mAccuracyMap.put("Accuracy  99,9%", 1);
+        mAccuracyMap.put("Accuracy  99,7%", 3);
+        mAccuracyMap.put("Accuracy  99,4%", 6);
+        mAccuracyMap.put("Accuracy  98.8%", 12);
+        mAccuracyMap.put("Accuracy  97.6%", 24);
+        mAccuracyMap.put("Accuracy  95.3%", 48);
+        mAccuracyMap.put("Accuracy  90,6%", 96);
+        mAccuracyMap.put("Accuracy  81,2%", 192);
 
 
 
@@ -96,9 +141,7 @@ public class Gui extends Application {
                 if (!file.exists()) {
                     mTfExamplePath.setStyle("-fx-text-fill: red;");
                     mExampleTextFieldValid = false;
-                    mBtnStartStop.setDisable(true);
-                }
-                else mExampleTextFieldValid = true;
+                } else mExampleTextFieldValid = true;
                 selectorAndOptionsGuiFeedback();
             } else {
                 mTfExamplePath.setStyle("-fx-text-fill: black;");
@@ -124,9 +167,7 @@ public class Gui extends Application {
                 if (!file.exists()) {
                     mTfSearchPath.setStyle("-fx-text-fill: red;");
                     mSearchTextFieldValid = false;
-                    mBtnStartStop.setDisable(true);
-                }
-                else mSearchTextFieldValid = true;
+                } else mSearchTextFieldValid = true;
                 selectorAndOptionsGuiFeedback();
             } else {
                 mTfSearchPath.setStyle("-fx-text-fill: black;");
@@ -237,7 +278,10 @@ public class Gui extends Application {
                 mExampleTextFieldValid = false;
                 mTfSearchPath.setText("");
                 mSearchTextFieldValid = false;
-                mBtnStartStop.setDisable(true);
+                selectorAndOptionsGuiFeedback();
+                mTiRoot.getChildren().clear();
+                mFlwpThumbnails.getChildren().clear();
+                mLblApplyChangesCounter.setText("0");
                 // TODO Also clear tree and thumbnail sections.
             }
         }
@@ -263,14 +307,19 @@ public class Gui extends Application {
                 sProcessingActivated = !sProcessingActivated;
                 if (sProcessingActivated) {
                     selectorAndOptionsGuiFeedback();
+                    mTiRoot.getChildren().clear();
+                    mFlwpThumbnails.getChildren().clear();
+                    mLblApplyChangesCounter.setText("0");
 
                     File examplePath = new File(mTfExamplePath.getText());
                     File searchPath = new File(mTfSearchPath.getText());
+                    if (mCbAccuracy.getSelectionModel().getSelectedIndex() == -1) mCbAccuracy.getSelectionModel().select(0);
+                    int allowedDeviation = mAccuracyMap.get(mCbAccuracy.getSelectionModel().getSelectedItem());
                     boolean traverseExamplePath = mCbxTraverseExamplePath.isSelected();
                     boolean traverseSearchPath = mCbxTraverseSearchPath.isSelected();
                     boolean duplicatesWithoutExample = mCbxDuplicatesWithoutExample.isSelected();
 
-                    Thread processController = new Thread(new ProcessController(examplePath, searchPath, traverseExamplePath, traverseSearchPath, duplicatesWithoutExample));
+                    Thread processController = new Thread(new ProcessController(examplePath, searchPath, allowedDeviation, traverseExamplePath, traverseSearchPath, duplicatesWithoutExample));
                     processController.setDaemon(true);
                     processController.start();
                 } else {
@@ -327,23 +376,44 @@ public class Gui extends Application {
             }
         });
 
-        GridPane gpOptionsColumn1 = getVerticalStackedGridPane(mCbxTraverseExamplePath, mCbxTraverseSearchPath, mCbxDuplicatesWithoutExample);
+        Label lblSpacer = new Label();
+        lblSpacer.setMinSize(100,3);
+        lblSpacer.setMaxSize(100,3);
+
+        ObservableList<String> accuracyOptions = FXCollections.observableArrayList(mAccuracyMap.keySet());
+        mCbAccuracy = new ComboBox<>(accuracyOptions);
+        mCbAccuracy.setMinWidth(SCENE_WIDTH / 4 - (DEFAULT_INSERTS * 0.5));
+        mCbAccuracy.setMaxWidth(SCENE_WIDTH / 4 - (DEFAULT_INSERTS * 0.5));
+        mCbAccuracy.getSelectionModel().select(0);
+
+        GridPane gpOptionsColumn1 = getVerticalStackedGridPane(mCbxTraverseExamplePath, mCbxTraverseSearchPath, mCbxDuplicatesWithoutExample, lblSpacer, mCbAccuracy);
         gpOptionsColumn1.setMinSize(SCENE_WIDTH / 4, TEXT_FIELD_HEIGHT * 2 + V_GAP * 2 + DEFAULT_INSERTS * 2 + BUTTON_HEIGHT);
         gpOptionsColumn1.setMaxSize(SCENE_WIDTH / 4, TEXT_FIELD_HEIGHT * 2 + V_GAP * 2 + DEFAULT_INSERTS * 2 + BUTTON_HEIGHT);
-        gpOptionsColumn1.setPadding(DEFAULT_PADDING);
-        gpOptionsColumn1.setVgap(5);
+        gpOptionsColumn1.setPadding(DEFAULT_PADDING_WITHOUT_LEFT_AND_HALF_RIGHT);
+        gpOptionsColumn1.setVgap(4);
 
 
 
-        CheckBox cbxOption4 = new CheckBox("Test Option 4");
-        CheckBox cbxOption5 = new CheckBox("Test Option 5");
-        CheckBox cbxOption6 = new CheckBox("Test Option 6");
+        mBtnApplyChanges = new Button("Delete Marked Pictures");
+        mBtnApplyChanges.setDisable(true);
+        mBtnApplyChanges.setMinSize(SCENE_WIDTH / 4 - (DEFAULT_INSERTS * 1.5), BUTTON_HEIGHT);
+        mBtnApplyChanges.setMaxSize(SCENE_WIDTH / 4 - (DEFAULT_INSERTS * 1.5), BUTTON_HEIGHT );
 
-        GridPane gpOptionsColumn2 = getVerticalStackedGridPane(cbxOption4, cbxOption5, cbxOption6);
+        mLblApplyChangesCounter = new Label("0");
+        mLblApplyChangesCounter.setDisable(true);
+        GridPane gpApplyChanges = getHorizontalStackedGridPane(mLblApplyChangesCounter);
+        gpApplyChanges.setDisable(true);
+        gpApplyChanges.setAlignment(Pos.CENTER_RIGHT);
+        gpApplyChanges.setPadding(DEFAULT_PADDING_WITHOUT_TOP_BOTTOM);
+
+        StackPane stkApplyChanges = new StackPane();
+        stkApplyChanges.getChildren().addAll(mBtnApplyChanges, gpApplyChanges);
+
+        GridPane gpOptionsColumn2 = getVerticalStackedGridPane(stkApplyChanges);
         gpOptionsColumn2.setMinSize(SCENE_WIDTH / 4, TEXT_FIELD_HEIGHT * 2 + V_GAP * 2 + DEFAULT_INSERTS * 2 + BUTTON_HEIGHT);
         gpOptionsColumn2.setMaxSize(SCENE_WIDTH / 4, TEXT_FIELD_HEIGHT * 2 + V_GAP * 2 + DEFAULT_INSERTS * 2 + BUTTON_HEIGHT);
-        gpOptionsColumn2.setPadding(DEFAULT_PADDING);
-        gpOptionsColumn2.setVgap(5);
+        gpOptionsColumn2.setPadding(DEFAULT_PADDING_HALF_LEFT);
+        gpOptionsColumn2.setAlignment(Pos.BOTTOM_CENTER);
 
 
 
@@ -361,61 +431,37 @@ public class Gui extends Application {
         // --------------------------------------------------------------------
         // GUI tree section from here. TODO Move out of testing phase.
 
-        mTiRoot = new TreeItem<>("Found results");
+        mTiRoot = new TreeItem<PicData>();
         mTiRoot.setExpanded(true);
 
-        TreeItem<String> tiExample1 = new TreeItem<>("Example 1");
+        mTvResults = new TreeView<>(mTiRoot);
+        mTvResults.getSelectionModel().selectedItemProperty().addListener(new ChangeListener<TreeItem<PicData>>() {
+            @Override
+            public void changed(ObservableValue<? extends TreeItem<PicData>> observable, TreeItem<PicData> oldValue, TreeItem<PicData> newValue) {
+                if (newValue != null) setThumbnail(newValue.getValue());
+            }
+        });
 
-        TreeItem<String> tiSubExampleA = new TreeItem<>("Subexample A");
-
-        TreeItem<String> tiSubExampleB = new TreeItem<>("Subexample B");
-
-        tiExample1.getChildren().addAll(tiSubExampleA, tiSubExampleB);
-
-        mTiRoot.getChildren().add(tiExample1);
-
-        TreeItem<String> tiExample2 = new TreeItem<>("Example 2");
-
-        mTiRoot.getChildren().add(tiExample2);
-
-        TreeItem<String> tiExample3 = new TreeItem<>("Example 3");
-
-        mTiRoot.getChildren().add(tiExample3);
-
-
-        TreeView<String> tvResults = new TreeView<>(mTiRoot);
         double heightGpSelectorAndOptions = (V_GAP * 2) + (DEFAULT_INSERTS * 2) + (TEXT_FIELD_HEIGHT * 3) + BUTTON_HEIGHT;
-        tvResults.setMinSize(SCENE_WIDTH / 2 - 20, SCENE_HEIGHT - heightGpSelectorAndOptions);
+        mTvResults.setMinSize(SCENE_WIDTH / 2 - 20, SCENE_HEIGHT - heightGpSelectorAndOptions);
 
         FlowPane fpResultTree = new FlowPane();
-        fpResultTree.getChildren().add(tvResults);
+        fpResultTree.getChildren().add(mTvResults);
 
 
 
         // --------------------------------------------------------------------
         // GUI thumbnail in a ScrollPane and result management sections from here. TODO Move out of testing phase.
 
-        FlowPane flwpThumbnails = new FlowPane();
-        flwpThumbnails.setOrientation(Orientation.HORIZONTAL);
-        flwpThumbnails.setAlignment(Pos.TOP_LEFT);
-        flwpThumbnails.setStyle("-fx-background-color: lightgrey");
-        flwpThumbnails.setMinSize(SCENE_WIDTH / 2 - 25, SCENE_HEIGHT - heightGpSelectorAndOptions);
-        flwpThumbnails.setHgap(5);
-        flwpThumbnails.setVgap(5);
+        mFlwpThumbnails = new FlowPane();
+        mFlwpThumbnails.setOrientation(Orientation.HORIZONTAL);
+        mFlwpThumbnails.setAlignment(Pos.TOP_LEFT);
+        mFlwpThumbnails.setStyle("-fx-background-color: lightgrey");
+        mFlwpThumbnails.setMinSize(SCENE_WIDTH / 2 - 25, SCENE_HEIGHT - heightGpSelectorAndOptions);
+        mFlwpThumbnails.setHgap(5);
+        mFlwpThumbnails.setVgap(5);
 
-        for (int i = 0; i < 16; i++) { // TODO Remove test object generation routine.
-            try {
-                File file = new File("D:\\UserFiles\\Robert\\OneDrive\\Coding_SymbLink\\Current\\SamePic\\src\\main\\resources\\IMG_2352-59[EC1V1].jpg");
-                URL url = file.toURI().toURL();
-                flwpThumbnails.getChildren().add(getThumbnail(new Image(url.toString(), 158, 158, true, false)));
-            } catch (MalformedURLException ex) {
-                ex.printStackTrace();
-            }
-        }
-
-
-
-        ScrollPane sclpThumbnails = new ScrollPane(flwpThumbnails);
+        ScrollPane sclpThumbnails = new ScrollPane(mFlwpThumbnails);
         sclpThumbnails.setStyle("-fx-background-color: lightgrey");
 
         GridPane gpThumbnails = getHorizontalStackedGridPane(sclpThumbnails);
@@ -437,23 +483,31 @@ public class Gui extends Application {
 
 
         // --------------------------------------------------------------------
-        // GUI status bar from here. // TODO Move out of testing phase.
+        // GUI status bar from here.
 
-        Label lblStatusBar = new Label("Status updates here. Loading... ;)");
-        lblStatusBar.setMinSize(SCENE_WIDTH - DEFAULT_INSERTS * 2, TEXT_FIELD_HEIGHT);
+        sPbPleaseWaitAnimation = new ProgressBar();
+        sPbPleaseWaitAnimation.setMinSize(0, 0);
+        sPbPleaseWaitAnimation.setMaxSize(0, 0);
 
-        GridPane gpStatusBar = getVerticalStackedGridPane(lblStatusBar);
-        gpStatusBar.setPadding(DEFAULT_PADDING_WITHOUT_TOP_BOTTOM);
+        sLblStatusBar = new Label();
+        sLblStatusBar.setMinSize(SCENE_WIDTH - DEFAULT_INSERTS * 2, TEXT_FIELD_HEIGHT);
+
+        sGpStatusBar = getHorizontalStackedGridPane(sPbPleaseWaitAnimation, sLblStatusBar);
+        sGpStatusBar.setPadding(DEFAULT_PADDING_WITHOUT_TOP_BOTTOM);
 
 
 
         // --------------------------------------------------------------------
         // GUI final coupling of all sections.
 
-        GridPane primaryRootNode = getVerticalStackedGridPane(gpSelectorAndOptions, gpResults, gpStatusBar);
+        GridPane primaryRootNode = getVerticalStackedGridPane(gpSelectorAndOptions, gpResults, sGpStatusBar);
         primaryRootNode.setMinSize(SCENE_WIDTH, SCENE_HEIGHT);
 
-        Scene primaryScene = new Scene(primaryRootNode,SCENE_WIDTH,SCENE_HEIGHT);
+        primaryScene = new Scene(primaryRootNode,SCENE_WIDTH,SCENE_HEIGHT);
+
+
+
+
 
         primaryStage.setTitle("SamePic v.0.1.0");
 
@@ -462,6 +516,21 @@ public class Gui extends Application {
         primaryStage.show();
         primaryStage.setMinWidth(primaryStage.getWidth());
         primaryStage.setMinHeight(primaryStage.getHeight());
+
+        mSceneToPrimaryStageDifferenceWidth = primaryStage.getWidth() - primaryScene.getWidth();
+        mSceneToPrimaryStageDifferenceHeight = primaryStage.getHeight() - primaryScene.getHeight();
+
+        primaryStage.widthProperty().addListener((obs, oldVal, newVal) -> {
+            mFlwpThumbnails.setMinWidth((SCENE_WIDTH / 2 - 25) + ((double) newVal - SCENE_WIDTH - mSceneToPrimaryStageDifferenceWidth));
+            gpThumbnails.setMinWidth((SCENE_WIDTH / 2 - 10) + ((double) newVal - SCENE_WIDTH - mSceneToPrimaryStageDifferenceWidth));
+            gpThumbnails.setMaxWidth((SCENE_WIDTH / 2 - 10) + ((double) newVal - SCENE_WIDTH - mSceneToPrimaryStageDifferenceWidth));
+        });
+        primaryStage.heightProperty().addListener((obs, oldVal, newVal) -> {
+            mTvResults.setMinHeight((SCENE_HEIGHT - heightGpSelectorAndOptions) + ((double) newVal - SCENE_HEIGHT - mSceneToPrimaryStageDifferenceHeight));
+            mFlwpThumbnails.setMinHeight((SCENE_HEIGHT - heightGpSelectorAndOptions) + ((double) newVal - SCENE_HEIGHT - mSceneToPrimaryStageDifferenceHeight));
+            gpThumbnails.setMinHeight((SCENE_HEIGHT - heightGpSelectorAndOptions) + ((double) newVal - SCENE_HEIGHT - mSceneToPrimaryStageDifferenceHeight));
+            gpThumbnails.setMaxHeight((SCENE_HEIGHT - heightGpSelectorAndOptions) + ((double) newVal - SCENE_HEIGHT - mSceneToPrimaryStageDifferenceHeight));
+        });
     }
 
 
@@ -521,13 +590,138 @@ public class Gui extends Application {
         return gridPane;
     }
 
-    private GridPane getThumbnail(Image image) {
+    private GridPane getThumbnail(Image image, boolean selectedPic, boolean examplePic, PicData picData) {
         ImageView ivImage = new ImageView(image);
-        GridPane gpImage = getHorizontalStackedGridPane(ivImage);
+
+        StackPane stack = new StackPane();
+        stack.getChildren().add(ivImage);
+
+        GridPane gpImage = getHorizontalStackedGridPane(stack);
         gpImage.setMinSize(158, 158);
         gpImage.setMaxSize(158, 158);
         gpImage.setAlignment(Pos.CENTER);
-        gpImage.setStyle("-fx-background-color: white");
+        gpImage.setOnMousePressed(new EventHandler<MouseEvent>() {
+            @Override
+            public void handle(MouseEvent event) {
+                TreeItem<PicData> treeItem = mTvHelperMapping.get(picData);
+                treeItem.setExpanded(true);
+                mTvResults.getSelectionModel().select(treeItem);
+
+                if (event.isSecondaryButtonDown() && !examplePic && selectedPic) {  // TODO Make preselection unnecessary before context menu popup.
+                    MenuItem miDeleteSingle = new MenuItem();
+                    if (picData.isMarkedForDeletion()) miDeleteSingle.setText("Unmark For Deletion");
+                    else miDeleteSingle.setText("Mark For Deletion");
+
+                    miDeleteSingle.setOnAction(new EventHandler<ActionEvent>() {
+                        @Override
+                        public void handle(ActionEvent event) {
+                            picData.setMarkedForDeletion(!picData.isMarkedForDeletion());
+                            setThumbnail(picData);
+                            setLblApplyChangesCounter();
+                        }
+                    });
+
+                    SeparatorMenuItem miSeparator1 = new SeparatorMenuItem();
+
+                    MenuItem miDeleteDirectoryMark = new MenuItem("Mark Directory For Deletion");
+                    miDeleteDirectoryMark.setOnAction(new EventHandler<ActionEvent>() {
+                        @Override
+                        public void handle(ActionEvent event) {
+                            Path parentPath = picData.getPath().getParent();
+                            for (List<PicData> picDataList : sPicDataListList) {
+                                picDataList.stream().filter(x -> x.getPath().getParent().equals(parentPath)).forEach(x -> x.setMarkedForDeletion(true));
+                            }
+                            setThumbnail(picData);
+                            setLblApplyChangesCounter();
+                        }
+                    });
+
+                    MenuItem miDeleteDirectoryUnmark = new MenuItem("Unmark Directory For Deletion");
+                    miDeleteDirectoryUnmark.setOnAction(new EventHandler<ActionEvent>() {
+                        @Override
+                        public void handle(ActionEvent event) {
+                            Path parentPath = picData.getPath().getParent();
+                            for (List<PicData> picDataList : sPicDataListList) {
+                                picDataList.stream().filter(x -> x.getPath().getParent().equals(parentPath)).forEach(x -> x.setMarkedForDeletion(false));
+                            }
+                            setThumbnail(picData);
+                            setLblApplyChangesCounter();
+                        }
+                    });
+
+                    SeparatorMenuItem miSeparator2 = new SeparatorMenuItem();
+
+                    MenuItem miDeleteDuplicatesMark = new MenuItem("Mark Duplicates for Deletion");
+                    miDeleteDuplicatesMark.setOnAction(new EventHandler<ActionEvent>() {
+                        @Override
+                        public void handle(ActionEvent event) {
+                            for (List<PicData> picDataList : sPicDataListList) {
+                                if (picDataList.contains(picData)) {
+                                    for (PicData picDataMark : picDataList) {
+                                        if (!picDataMark.isExamplePicture()) picDataMark.setMarkedForDeletion(true);
+                                        setThumbnail(picDataMark);
+                                    }
+                                }
+                            }
+                            setLblApplyChangesCounter();
+                        }
+                    });
+
+                    MenuItem miDeleteDuplicatesUnmark = new MenuItem("Unmark Duplicates for Deletion");
+                    miDeleteDuplicatesUnmark.setOnAction(new EventHandler<ActionEvent>() {
+                        @Override
+                        public void handle(ActionEvent event) {
+                            for (List<PicData> picDataList : sPicDataListList) {
+                                if (picDataList.contains(picData)) {
+                                    for (PicData picDataMark : picDataList) {
+                                        if (!picDataMark.isExamplePicture()) picDataMark.setMarkedForDeletion(false);
+                                        setThumbnail(picDataMark);
+                                    }
+                                }
+                            }
+                            setLblApplyChangesCounter();
+                        }
+                    });
+
+                    ContextMenu contextMenu = new ContextMenu();
+                    contextMenu.getItems().addAll(miDeleteSingle, miSeparator1, miDeleteDirectoryMark, miDeleteDirectoryUnmark, miSeparator2, miDeleteDuplicatesMark, miDeleteDuplicatesUnmark);
+                    contextMenu.show(gpImage, event.getScreenX(), event.getScreenY());
+
+                }
+            }
+        });
+
+        if (examplePic) {
+            Label lblExamplePic = new Label("Example Pic");
+            lblExamplePic.setRotate(30);
+            lblExamplePic.setStyle("-fx-background-color: palegreen; -fx-font-size: 30; -fx-effect: dropshadow(three-pass-box, black, 10, 0, 0, 0);");
+            stack.getChildren().add(lblExamplePic);
+            gpImage.setOnMouseEntered(new EventHandler<MouseEvent>() {
+                @Override
+                public void handle(MouseEvent event) {
+                    lblExamplePic.setVisible(false);
+                }
+            });
+            gpImage.setOnMouseExited(new EventHandler<MouseEvent>() {
+                @Override
+                public void handle(MouseEvent event) {
+                    lblExamplePic.setVisible(true);
+                }
+            });
+        } else {
+
+        }
+
+
+
+        if (selectedPic) {
+            if (picData.isMarkedForDeletion()) gpImage.setStyle("-fx-background-color: red");
+            else gpImage.setStyle("-fx-background-color: white");
+        }
+        else {
+            if (picData.isMarkedForDeletion()) gpImage.setStyle("-fx-background-color: darkred");
+            else gpImage.setStyle("-fx-background-color: grey");
+        }
 
         return getVerticalStackedGridPane(gpImage);
     }
@@ -538,7 +732,7 @@ public class Gui extends Application {
     // ========================================================================
     // From here helper methods for maintaining the GUI.
 
-    private void selectorAndOptionsGuiFeedback() {
+    private static void selectorAndOptionsGuiFeedback() {
         if (mCbxDuplicatesWithoutExample.isSelected()) {
             if (mSearchTextFieldValid) mBtnStartStop.setDisable(false);
             else mBtnStartStop.setDisable(true);
@@ -547,24 +741,29 @@ public class Gui extends Application {
             mBtnExampleFolder.setDisable(true);
             mTfExamplePath.setDisable(true);
             mCbxTraverseExamplePath.setDisable(true);
+            mCbAccuracy.setDisable(true);
             if (sProcessingActivated) {
                 mBtnStartStop.setText("Stop");
                 mTfSearchPath.setEditable(false);
                 mBtnSearchFolder.setDisable(true);
                 mBtnClear.setDisable(true);
+                mCbxTraverseSearchPath.setDisable(true);
+                mCbxDuplicatesWithoutExample.setDisable(true);
             } else {
                 mBtnStartStop.setText("Start");
                 mTfSearchPath.setEditable(true);
                 mBtnSearchFolder.setDisable(false);
                 mBtnClear.setDisable(false);
+                mCbxTraverseSearchPath.setDisable(false);
+                mCbxDuplicatesWithoutExample.setDisable(false);
             }
         } else {
             if (mExampleTextFieldValid && mSearchTextFieldValid) mBtnStartStop.setDisable(false);
             else mBtnStartStop.setDisable(true);
 
             mTfExamplePath.setDisable(false);
-            mCbxTraverseExamplePath.setDisable(false);
 
+            mCbAccuracy.setDisable(false);
             if (sProcessingActivated) {
                 mBtnStartStop.setText("Stop");
                 mTfExamplePath.setEditable(false);
@@ -573,6 +772,10 @@ public class Gui extends Application {
                 mBtnExampleFolder.setDisable(true);
                 mBtnSearchFolder.setDisable(true);
                 mBtnClear.setDisable(true);
+                mCbAccuracy.setDisable(true);
+                mCbxTraverseExamplePath.setDisable(true);
+                mCbxTraverseSearchPath.setDisable(true);
+                mCbxDuplicatesWithoutExample.setDisable(true);
             } else {
                 mBtnStartStop.setText("Start");
                 mTfExamplePath.setEditable(true);
@@ -581,9 +784,139 @@ public class Gui extends Application {
                 mBtnExampleFolder.setDisable(false);
                 mBtnSearchFolder.setDisable(false);
                 mBtnClear.setDisable(false);
+                mCbAccuracy.setDisable(false);
+                mCbxTraverseExamplePath.setDisable(false);
+                mCbxTraverseSearchPath.setDisable(false);
+                mCbxDuplicatesWithoutExample.setDisable(false);
+                if (mCbAccuracy.getSelectionModel().getSelectedIndex() == -1) mCbAccuracy.getSelectionModel().select(0);
             }
         }
     }
+
+    private void setThumbnail(PicData picData) {
+        List<PicData> thumbnailPicDataList = null;
+        for (List<PicData> picDataList : sPicDataListList) {
+            if (picDataList.contains(picData)) thumbnailPicDataList = picDataList;
+        }
+
+        mFlwpThumbnails.getChildren().clear();
+        if (thumbnailPicDataList != null) {
+            for (PicData picDataForThumbnail : thumbnailPicDataList) {
+                boolean selectedPic = (picData.equals(picDataForThumbnail));
+                boolean examplePic = (picDataForThumbnail.isExamplePicture());
+                if (!picDataForThumbnail.isDoNotShowThumbnail()) mFlwpThumbnails.getChildren().add(getThumbnail(new Image(picDataForThumbnail.getUrl().toString(), 158, 158, true, false), selectedPic, examplePic, picDataForThumbnail));
+            }
+        }
+
+    }
+
+    public static void setTree(List<List<PicData>> pictureListList, boolean containsExample) {
+        Platform.runLater(new Runnable() {
+            @Override
+            public void run() {
+                sPicDataListList = pictureListList;
+                sContainsExample = containsExample;
+                mTvHelperMapping = new HashMap<>();
+                mTiRoot.getChildren().clear();
+                sTreeItemIndex = new ArrayList();
+
+                if (containsExample) {
+                    for (List<PicData> picDataList : pictureListList) {
+                        TreeItem<PicData> firstLevel = new TreeItem<>();
+                        for (int i = 0; i < picDataList.size(); i++) {
+                            if (i == 0) {
+                                firstLevel = new TreeItem<>(picDataList.get(0));
+                                sTreeItemIndex.add(firstLevel.getValue());
+                                mTvHelperMapping.put(firstLevel.getValue(), firstLevel);
+                            }
+                            else {
+                                TreeItem<PicData> secondLevel = new TreeItem<>(picDataList.get(i));
+                                firstLevel.getChildren().add(secondLevel);
+                                sTreeItemIndex.add(secondLevel.getValue());
+                                mTvHelperMapping.put(secondLevel.getValue(), secondLevel);
+                            }
+                        }
+                        mTiRoot.getChildren().add(firstLevel);
+                    }
+                } else {
+                    int count = 1;
+                    for (List<PicData> picDataList : pictureListList) {
+                        TreeItem<PicData> firstLevel;
+                        try {
+                            PicData administrativeExamplePic = new PicData(Paths.get("Collection" + count++), false, true);
+                            picDataList.add(0, administrativeExamplePic);
+                            firstLevel = new TreeItem<>(administrativeExamplePic);
+                            sTreeItemIndex.add(firstLevel.getValue());
+                            mTvHelperMapping.put(firstLevel.getValue(), firstLevel);
+                        } catch (MalformedURLException mfuEx) {
+                            continue;
+                        }
+                        for (int i = 1; i < picDataList.size(); i++) {
+                            TreeItem<PicData> secondLevel = new TreeItem<>(picDataList.get(i));
+                            firstLevel.getChildren().add(secondLevel);
+                            sTreeItemIndex.add(secondLevel.getValue());
+                            mTvHelperMapping.put(secondLevel.getValue(), secondLevel);
+                        }
+                        mTiRoot.getChildren().add(firstLevel);
+                    }
+                }
+            }
+        });
+    }
+
+    public void setLblApplyChangesCounter() {
+        Platform.runLater(new Runnable() {
+            @Override
+            public void run() {
+                int count = 0;
+                for (List<PicData> picDataList : sPicDataListList) {
+                    for (PicData picDataCounter : picDataList) {
+                        if (picDataCounter.isMarkedForDeletion()) count++;
+                    }
+                }
+                mLblApplyChangesCounter.setText("" + count);
+                if (count > 0) mBtnApplyChanges.setDisable(false);
+                else mBtnApplyChanges.setDisable(true);
+            }
+        });
+    }
+
+    public static void showPleaseWaitAnimation(boolean showPleaseWaitAnimation) {
+        if (showPleaseWaitAnimation) {
+            sPbPleaseWaitAnimation.setMinSize(TEXT_FIELD_HEIGHT / 1.5, TEXT_FIELD_HEIGHT / 1.5);
+            sPbPleaseWaitAnimation.setMaxSize(TEXT_FIELD_HEIGHT / 1.5, TEXT_FIELD_HEIGHT / 1.5);
+            sGpStatusBar.setHgap(10);
+
+            Platform.runLater(new Runnable() {
+                @Override
+                public void run() {
+                    primaryScene.setCursor(Cursor.WAIT);
+                }
+            });
+
+        } else {
+            sPbPleaseWaitAnimation.setMinSize(0, 0);
+            sPbPleaseWaitAnimation.setMaxSize(0, 0);
+            sGpStatusBar.setHgap(0);
+
+            Platform.runLater(new Runnable() {
+                @Override
+                public void run() {
+                    primaryScene.setCursor(Cursor.DEFAULT);
+                }
+            });
+        }
+    }
+
+    public static void updateStatusBar(String string) {
+        Platform.runLater(new Runnable() {
+            @Override
+            public void run() {
+                sLblStatusBar.setText(string);
+            }
+        });
+    }
+
 
 
     // ========================================================================
@@ -592,5 +925,15 @@ public class Gui extends Application {
 
     public static boolean isProcessingActivated() {
         return sProcessingActivated;
+    }
+
+    public static void setProcessingActivated(boolean processingActivated) {
+        sProcessingActivated = processingActivated;
+        Platform.runLater(new Runnable() {
+            @Override
+            public void run() {
+                selectorAndOptionsGuiFeedback();
+            }
+        });
     }
 }

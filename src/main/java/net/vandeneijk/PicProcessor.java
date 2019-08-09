@@ -6,40 +6,46 @@ import java.awt.image.DataBufferByte;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
-public class PicProcessor implements Runnable{
+public class PicProcessor {
 
     private static final DataStore S_DATA_STORE = DataStore.getInstance();
 
-    private Picture mPicture;
+    private PicData mPicData;
     private URL mUrl;
-    private BufferedImage mImage;
+    private BufferedImage mBufferedImage;
     private static final int[] S_PRIMES = {29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101};
     private int[][][] mPictureLayouts = new int[4][][];
-    private Set<Long> foundHashesEntirePic = new HashSet<>();
+    private Set<Long> found64bHashesEntirePic = new HashSet<>();
 
-    public PicProcessor(Picture picture) {
-        mPicture = picture;
-        mUrl = mPicture.getUrl();
+    private List<Integer> tempCountList = new ArrayList<>();
+
+    public PicProcessor(PicData picData) {
+        mPicData = picData;
+        mUrl = mPicData.getUrl();
     }
 
     public void run() {
         try {
-            mImage = ImageIO.read(mUrl);
-        } catch (IOException ioEx) {
-            ioEx.printStackTrace(); // TODO Better exception handling.
+            mBufferedImage = ImageIO.read(mUrl); // TODO Almost all of the delay during processing comes from this statement. How to improve.
+            if (mBufferedImage == null) return;
+            if (mBufferedImage.getWidth() < 256 || mBufferedImage.getHeight() < 256) throw new SmallPictureException();
+        } catch (IOException | SmallPictureException miscEx) {
+            return;
         }
 
-        mPicture.setPictureLayout1(convertPicToGreyScale2DArray());
-        mPicture.setPictureLayout2(rotatePicOrientation(mPicture.getPictureLayout1()));
-        mPicture.setPictureLayout3(rotatePicOrientation(mPicture.getPictureLayout2()));
-        mPicture.setPictureLayout4(rotatePicOrientation(mPicture.getPictureLayout3()));
+        mPictureLayouts[0] = convertPicToGreyScale2DArray();
+        mPictureLayouts[1] = rotatePicOrientation(mPictureLayouts[0]);
+        mPictureLayouts[2] = rotatePicOrientation(mPictureLayouts[1]);
+        mPictureLayouts[3] = rotatePicOrientation(mPictureLayouts[2]);
 
         calcCellValuesEntirePic();
+
+        int tempCountCheck = tempCountList.get(0);
+        for (int i = 1; i < tempCountList.size(); i++) {
+            if (tempCountCheck != tempCountList.get(i)) System.out.println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! + " + tempCountList);
+        }
 
         storeResults();
     }
@@ -51,10 +57,10 @@ public class PicProcessor implements Runnable{
      */
     private int[][] convertPicToGreyScale2DArray() {
 
-        final byte[] pixels = ((DataBufferByte) mImage.getRaster().getDataBuffer()).getData();
-        final int width = mImage.getWidth();
-        final int height = mImage.getHeight();
-        final boolean hasAlphaChannel = mImage.getAlphaRaster() != null;
+        final byte[] pixels = ((DataBufferByte) mBufferedImage.getRaster().getDataBuffer()).getData();
+        final int width = mBufferedImage.getWidth();
+        final int height = mBufferedImage.getHeight();
+        final boolean hasAlphaChannel = mBufferedImage.getAlphaRaster() != null;
 
         int[][] result = new int[width][height];
 
@@ -107,52 +113,85 @@ public class PicProcessor implements Runnable{
     }
 
     /**
-     * This method divides the entire picture in a raster of 8x8. It calculates the average luminosity of each cell and then uses the calcHash
-     * method to create a 64 bit hash from the values of the 64 cells. The special trick here is that the raster of 8x8 is actually build from 4
-     * times a raster of 4x4. Each raster of 4x4 starts at a corner of the picture. This way, if the picture can't be exactly divided by 8 along each
-     * axis, the skipped pictures will be in the middle forming a stripe or a cross. Reason for this is to force calculation of the same pixels when
-     * the orientation of the picture is changed.
+     * This method divides the entire picture in a raster of 32. It calculates the average luminosity of each cell and then uses the calcHash1024b and
+     * calcHash methods to create a 1024 and 64 bit hash from the values of the 1024 cells. The special trick here is that the raster of 32x32 is
+     * actually build from 4  times a raster of 16x16. Each raster of 16x16 starts at a corner of the picture. This way, if the picture can't be
+     * exactly divided by 32 along each axis, the skipped pictures will be in the middle forming a stripe or a cross. Reason for this is to force
+     * calculation of the same pixels when the orientation of the picture is changed.
      */
     private void calcCellValuesEntirePic() {
-        mPictureLayouts[0] = mPicture.getPictureLayout1();
-        mPictureLayouts[1] = mPicture.getPictureLayout2();
-        mPictureLayouts[2] = mPicture.getPictureLayout3();
-        mPictureLayouts[3] = mPicture.getPictureLayout4();
-
         for (int[][] pictureLayout : mPictureLayouts) {
             int pictureWidth = pictureLayout.length;
             int pictureHeight = pictureLayout[0].length;
-            int cellSizeX = pictureWidth / 8;
-            int cellSizeY = pictureHeight / 8;
+            int cellSizeX = pictureWidth / 32;
+            int cellSizeY = pictureHeight / 32;
             int jumpPixelsX;
             int jumpPixelsY;
-            List<Integer> cellValues = new ArrayList<>();
+            List<Integer> cellValues1024 = new ArrayList<>();
+            List<Integer> cellValues64 = new ArrayList<>();
 
-
-
-            for (int rasterPositionX = 0; rasterPositionX < 8; rasterPositionX++) {
-                for (int rasterPositionY = 0; rasterPositionY < 8; rasterPositionY++) {
-                    if (rasterPositionX > 3) jumpPixelsX = pictureWidth - (cellSizeX * 8);
-                    else jumpPixelsX = 0;
-                    if (rasterPositionY > 3) jumpPixelsY = pictureHeight - (cellSizeY * 8);
+            for (int rasterPositionY = 0; rasterPositionY < 32; rasterPositionY++) {
+                for (int rasterPositionX = 0; rasterPositionX < 32; rasterPositionX++) {
+                    if (rasterPositionY > 15) jumpPixelsY = pictureHeight - (cellSizeY * 32);
                     else jumpPixelsY = 0;
+                    if (rasterPositionX > 15) jumpPixelsX = pictureWidth - (cellSizeX * 32);
+                    else jumpPixelsX = 0;
 
-                    long cellValue = 0;
+                    long cell1024Value = 0;
 
-                    for (int pixelX = 0; pixelX < cellSizeX; pixelX++) {
-                        for (int pixelY = 0; pixelY < cellSizeY; pixelY++) {
-                            cellValue += pictureLayout[(rasterPositionX * cellSizeX) + jumpPixelsX + pixelX][(rasterPositionY * cellSizeY) + jumpPixelsY + pixelY];
+                    for (int pixelY = 0; pixelY < cellSizeY; pixelY++) {
+                        for (int pixelX = 0; pixelX < cellSizeX; pixelX++) {
+                            cell1024Value += pictureLayout[(rasterPositionX * cellSizeX) + jumpPixelsX + pixelX][(rasterPositionY * cellSizeY) + jumpPixelsY + pixelY];
                         }
                     }
 
-                    cellValue /= cellSizeX * cellSizeY;
-                    cellValues.add((int) cellValue);
+                    cell1024Value /= cellSizeX * cellSizeY;
+                    cellValues1024.add((int) cell1024Value);
                 }
             }
 
-            foundHashesEntirePic.add(calcHash(cellValues));
+            mPicData.addHash1024b(calcHash1024b(cellValues1024));
+
+            for (int rasterPositionY = 0; rasterPositionY < 8; rasterPositionY++) {
+                for (int rasterPositionX = 0; rasterPositionX < 8; rasterPositionX++) {
+                    long cell64Value = 0;
+
+                    for (int cell1024Y = 0; cell1024Y < 4; cell1024Y++) {
+                        for (int cell1024X = 0; cell1024X < 4; cell1024X++) {
+                            cell64Value += cellValues1024.get((rasterPositionX * 4) + (rasterPositionY * 128) + cell1024X + (cell1024Y * 32));
+                        }
+                    }
+
+                    cell64Value /= 16;
+                    cellValues64.add((int) cell64Value);
+                }
+            }
+            found64bHashesEntirePic.add(calcHash(cellValues64));
         }
     }
+
+    private List<Byte> calcHash1024b(List<Integer> cellValues) {
+        long totalCellValues = 0;
+        for (int value : cellValues) totalCellValues += value;
+        int averageCellValue = (int) (totalCellValues / 1024);
+
+        int tempCount = 0;
+
+        List<Byte> hash1024b = new ArrayList<>();
+        for (Integer cellValue : cellValues) {
+            if (cellValue >= averageCellValue) {
+                hash1024b.add((byte) 1);
+                tempCount++;
+            }
+            else hash1024b.add((byte) 0);
+        }
+
+        tempCountList.add(tempCount);
+        return hash1024b;
+    }
+
+
+
 
     private long calcHash(List<Integer> cellValues) { // TODO Wouldn't it be better with bitshift.
         long totalCellValues = 0;
@@ -169,9 +208,7 @@ public class PicProcessor implements Runnable{
         for (int i = 0; i < 63; i++) {
             if(cellValues.get(i) >= averageCellValue) {
                 result += valueToAdd;
-                System.out.print(1 + " ");
-            } else System.out.print("  ");
-            if ((i + 1) % 8 == 0) System.out.println();
+            }
 
             if (i < 62) valueToAdd *= 2;
         }
@@ -179,18 +216,16 @@ public class PicProcessor implements Runnable{
         if(cellValues.get(63) >= averageCellValue) { // The goal is to force a long overflow on the result variable instead of adding a negative valueToAdd variable that is overflown.
             result += valueToAdd;
             result += valueToAdd;
-            System.out.print(1 + " ");
-        } else System.out.print("  ");
+        }
 
-        System.out.println();
-        System.out.println();
-        System.out.println();
         return result;
     }
 
-    private void storeResults() {
-        S_DATA_STORE.addAllToEntirePicHashResults(foundHashesEntirePic, mPicture.getPath());
-        S_DATA_STORE.addToPictureFinishedProcessing(mPicture);
+        private void storeResults() {
+        mPicData.setHash64b(found64bHashesEntirePic);
+        S_DATA_STORE.addAllToEntirePicHashResults(mPicData.getHash1024bAmountOfOnes(), mPicData.getPath());
+        if (mPicData.isExamplePicture()) S_DATA_STORE.addToExamplePictureFinishedHashing(mPicData);
+        else S_DATA_STORE.addToPictureFinishedProcessing(mPicData);
     }
 
 
@@ -225,7 +260,7 @@ public class PicProcessor implements Runnable{
      */
     private void tempTestWritePictureToDisk() {
         try {
-            int[][] regen = mPicture.getPictureLayout1();
+            int[][] regen = mPictureLayouts[0];
 
             BufferedImage img = new BufferedImage(
                     regen.length, regen[0].length, BufferedImage.TYPE_3BYTE_BGR);
