@@ -1,3 +1,9 @@
+/**
+ * Class that contains information for a single picture.
+ *
+ * @author Robert van den Eijk
+ */
+
 package net.vandeneijk;
 
 import java.net.MalformedURLException;
@@ -5,27 +11,36 @@ import java.net.URL;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 public class PicData {
 
+    // Variables related to the constructor.
     private final Path mPath;
     private final URL mUrl;
     private final boolean mExamplePicture;
-    private final String mUniqueID;
     private boolean mDoNotShowThumbnail;
+    private final String mUniqueID;
+
+    // Variables set and modified by setters.
     private boolean mMarkedForDeletion;
-    private List<Long> mHash64b;
+    private int mPictureWidth;
+    private int mPictureHeight;
+    private long mPictureFileSize;
+    private double mAccuracy;
     private List<List<Byte>> mHash1024b = new ArrayList<>();
 
-    public PicData(Path path, boolean examplePicture, boolean doNotShowThumbnail) throws MalformedURLException {
+
+
+    PicData(Path path, boolean examplePicture, boolean doNotShowThumbnail) throws MalformedURLException {
         mPath = path;
         mUrl = mPath.toUri().toURL();
         mExamplePicture = examplePicture;
         mDoNotShowThumbnail = doNotShowThumbnail;
         mUniqueID = UUID.randomUUID().toString();
     }
+
+
 
     @Override
     public String toString() {
@@ -44,43 +59,72 @@ public class PicData {
         return mUniqueID.hashCode();
     }
 
-    public Path getPath() {
+    Path getPath() {
         return mPath;
     }
 
-    public URL getUrl() {
+    URL getUrl() {
         return mUrl;
     }
 
-    public boolean isExamplePicture() {
+    boolean isExamplePicture() {
         return mExamplePicture;
     }
 
-    public boolean isDoNotShowThumbnail() {
+    boolean isDoNotShowThumbnail() {
         return mDoNotShowThumbnail;
     }
 
-    public boolean isMarkedForDeletion() {
+    boolean isMarkedForDeletion() {
         return mMarkedForDeletion;
     }
 
-    public void setMarkedForDeletion(boolean markedForDeletion) {
+    void setMarkedForDeletion(boolean markedForDeletion) {
         mMarkedForDeletion = markedForDeletion;
     }
 
-    public List<Long> getHash64b() {
-        return new ArrayList<>(mHash64b);
+    int getPictureWidth() {
+        return mPictureWidth;
     }
 
-    public void setHash64b(Set<Long> hash64b) {
-        mHash64b = new ArrayList<>(hash64b);
+    void setPictureWidth(int pictureWidth) {
+        mPictureWidth = pictureWidth;
     }
 
-    public List<List<Byte>> getHash1024b() {
+    int getPictureHeight() {
+        return mPictureHeight;
+    }
+
+    void setPictureHeight(int pictureHeight) {
+        mPictureHeight = pictureHeight;
+    }
+
+    long getPictureFileSize() {
+        return mPictureFileSize;
+    }
+
+    void setPictureFileSize(long pictureFileSize) {
+        mPictureFileSize = pictureFileSize;
+    }
+
+    double getAccuracy() {
+        return mAccuracy;
+    }
+
+    void setAccuracy(double accuracy) {
+        mAccuracy = accuracy;
+    }
+
+    List<List<Byte>> getHash1024b() {
         return new ArrayList<>(mHash1024b);
     }
 
-    public short getHash1024bAmountOfOnes() {
+    /**
+     * Returns the number of binary 1's in 1024 bit hash.
+     *
+     * @return
+     */
+    short getHash1024bAmountOfOnes() {
         short count = 0;
         if (mHash1024b.get(0) == null) return 0;
         for (Byte value : mHash1024b.get(0)) {
@@ -89,7 +133,7 @@ public class PicData {
         return count;
     }
 
-    public void addHash1024b(List<Byte> hashList) {
+    void addHash1024b(List<Byte> hashList) {
         mHash1024b.add(hashList);
     }
 }

@@ -1,3 +1,9 @@
+/**
+ * Class that starts and keeps check on various 'under the hood' processes as started from the Gui class.
+ *
+ * @author Robert van den Eijk
+ */
+
 package net.vandeneijk;
 
 import java.io.File;
@@ -9,54 +15,67 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class ProcessController implements Runnable {
-    private static final DataStore S_DATA_STORE = DataStore.getInstance();
+
+    // Final class variables.
     private static final int S_CORE_COUNT = Runtime.getRuntime().availableProcessors();
 
-    private final Set<String> sAcceptedFileExtensions;
-
+    // Variables related to the constructor.
     private Path mExamplePath;
     private Path mSearchPath;
     private int mAllowedDeviation;
     private boolean mTraverseExamplePath;
     private boolean mTraverseSearchPath;
-    private boolean mDuplicatesWithoutExample;
+    private boolean mUseExamplePath;
+    private static final Set<String> sAcceptedFileExtensions = new HashSet<>();
+
+    // Variables filled and initialized by method calls and statements in this class.
+    private PicsProcessor mPicsProcessor = new PicsProcessor();
     private List<Path> mPathExampleList = new ArrayList<>();
     private List<Path> mSearchPathList = new ArrayList<>();
+    private Map<Path, PicData> mWaitingLinePicForProcessing = new HashMap<>();
     private ExecutorService mExecService;
+    private int mCountProcessing = 0;
 
-    public ProcessController(File examplePath, File searchPath, int allowedDeviation, boolean traverseExamplePath, boolean traverseSearchPath, boolean duplicatesWithoutExample) {
+
+
+    ProcessController(File examplePath, File searchPath, int allowedDeviation, boolean traverseExamplePath, boolean traverseSearchPath, boolean useExamplePath) {
         mExamplePath = Paths.get(examplePath.toURI());
         mSearchPath = Paths.get(searchPath.toURI());
         mAllowedDeviation = allowedDeviation;
         mTraverseExamplePath = traverseExamplePath;
         mTraverseSearchPath = traverseSearchPath;
-        mDuplicatesWithoutExample = duplicatesWithoutExample; // If mBtnStartStop is pressed to stop, this variable is set to true to prevent problematic situation where mBtnStartStop is pressed twice in quick succession.
+        mUseExamplePath = useExamplePath;
 
-        sAcceptedFileExtensions = S_DATA_STORE.getAcceptedFileExtensions();
+        sAcceptedFileExtensions.add("jpg");
+        sAcceptedFileExtensions.add("jpeg");
+        sAcceptedFileExtensions.add("png");
+        sAcceptedFileExtensions.add("bmp");
     }
 
-    public void run() {
 
+
+    public void run() {
         try {
             long startMillis = System.currentTimeMillis();
             Gui.showPleaseWaitAnimation(true);
-            S_DATA_STORE.cleanUpOldDataBeforeNewRun();
 
             mExecService = Executors.newFixedThreadPool(S_CORE_COUNT);
+
+
 
             Gui.updateStatusBar("Reading File Information.");
             traversePath();
             createPicDataFromPath();
 
-            // processPicData has its own status bar updates.
-            processPicData();
+            // preProcessPicData has its own status bar updates.
+            preProcessPicData();
 
-            Gui.updateStatusBar("Calculation Results.");
+            // sendResultsToGui has its own status bar updates.
             sendResultsToGui();
 
             Gui.updateStatusBar("Finished in " + ((System.currentTimeMillis() - startMillis) / 1000.0) + " seconds." );
-        } catch (ProcessingAbortedException paEx) {
-            return; // This instance of ProcessController will stop to exist and the GUI will not be updated with partly processed results.
+        } catch (ProcessingAbortedException paEx) { // This instance of ProcessController will stop to exist and the GUI will NOT be updated with partly processed results.
+            Gui.updateStatusBar("Processing aborted!");
         } finally {
             if (mExecService != null) mExecService.shutdownNow();
             Gui.showPleaseWaitAnimation(false);
@@ -64,13 +83,23 @@ public class ProcessController implements Runnable {
         }
     }
 
+    private synchronized PicData getFromWaitingLinePicForProcessing() {
+        PicData picData = null;
+
+        for (Path path : mWaitingLinePicForProcessing.keySet()) {
+            picData = mWaitingLinePicForProcessing.get(path);
+            mWaitingLinePicForProcessing.remove(path);
+            break;
+        }
+
+        return picData;
+    }
+
     /**
-     * Traverse ExamplePath and SearchPath depending options and write results to the respective List.
-     *
-     * TODO Multi-threading could increase performance somewhat in certain situations. However, examples and search must be on different fysical drives. How to determine for different OS?
+     * Traverses ExamplePath and SearchPath depending options and writes results to their respective List.
      */
     private void traversePath() throws ProcessingAbortedException {
-        if (!mDuplicatesWithoutExample) {
+        if (mUseExamplePath) {
             if (Files.isRegularFile(mExamplePath)) mPathExampleList.add(mExamplePath);
             else mPathExampleList = getPicPathList(mExamplePath, mTraverseExamplePath);
         }
@@ -78,18 +107,14 @@ public class ProcessController implements Runnable {
     }
 
     /**
-     * Create PicData objects from Path objects created in the traversePath method and write to S_DATA_STORE.
-     *
-     * TODO Multi-threading could increase performance somewhat in certain situations. However, examples and search must be on different fysical drives. How to determine for different OS?
+     * Creates PicData objects from Path objects created in the traversePath method and writes to mWaitingLinePicForProcessing.
      */
     private void createPicDataFromPath() throws ProcessingAbortedException {
-        long startMillis = System.currentTimeMillis();
-        if (!mDuplicatesWithoutExample) {
+        if (mUseExamplePath) {
             for (Path path : mPathExampleList) {
                 try {
                     if (!Gui.isProcessingActivated()) throw new ProcessingAbortedException();
-                    if (path == null) System.out.println("Path is null : " + path); // TODO Remove, is only for testing.
-                    S_DATA_STORE.addToWaitingLinePicturesToArray(new PicData(path, true, false));
+                    mWaitingLinePicForProcessing.put(path, new PicData(path, true, false));
                 } catch (MalformedURLException mfuEx) {
                     // May be ignored. File will be skipped though.
                 }
@@ -99,44 +124,42 @@ public class ProcessController implements Runnable {
         for (Path path : mSearchPathList) {
             try {
                 if (!Gui.isProcessingActivated()) throw new ProcessingAbortedException();
-                if (path == null) System.out.println("Path is null : " + path); // TODO Remove, is only for testing.
-                S_DATA_STORE.addToWaitingLinePicturesToArray(new PicData(path, false, false));
+                mWaitingLinePicForProcessing.put(path, new PicData(path, false, false));
             } catch (MalformedURLException mfuEx) {
                 // May be ignored. File will be skipped though.
             }
         }
-
-        System.out.println(System.currentTimeMillis() - startMillis);
     }
 
     /**
-     * Asks S_DATA_STORE to create 4 1024 hashes from each picture as represented by a PicData object.
+     * Creates multiple Callables depending S_CORE_COUNT. Each Callable will process work from mWaitingLinePicForProcessing as long as new work is
+     * available. The PicPreProcessor class called from within does the heavy lifting.
      */
-    private void processPicData() throws ProcessingAbortedException {
-        System.out.println(S_CORE_COUNT);
-
+    private void preProcessPicData() throws ProcessingAbortedException {
         List<Callable<Boolean>> processPicDataTasks = new ArrayList<>();
+        final int amountProcessing = mWaitingLinePicForProcessing.size();
+
         for (int i = 0; i < S_CORE_COUNT; i++) {
             processPicDataTasks.add(() -> {
                 PicData picToProcess;
-                while ((picToProcess = S_DATA_STORE.getFromWaitingLinePicturesForProcessing()) != null) {
+                while ((picToProcess = getFromWaitingLinePicForProcessing()) != null) {
                     if (!Gui.isProcessingActivated()) throw new ProcessingAbortedException();
-                    Gui.updateStatusBar("Processing : " + picToProcess.getPath());
+                    Gui.updateStatusBar("Pre-processing picture " + ++mCountProcessing + " of " + amountProcessing + ": " + picToProcess.getPath());
                     try {
                         Thread.sleep(25); // Improves performance of other apps and GUI at a slight cost on multicore systems without hyper-threading.
                     } catch (InterruptedException iEx) {
-                        iEx.printStackTrace();
+                        // Ignore for now.
                     }
-                    new PicProcessor(picToProcess).run();
+                    new PicPreProcessor(picToProcess, mPicsProcessor).run();
                 }
                 return true;
             });
         }
 
         try {
-            List<Future<Boolean>> futures = mExecService.invokeAll(processPicDataTasks);
+            List<Future<Boolean>> futures = mExecService.invokeAll(processPicDataTasks); // Waits here until all Callables have returned a result or thrown an exception.
             for (Future<Boolean> future : futures) {
-                if (!future.get());
+                future.get(); // If an exception was thrown in the Callable, it will be rethrown because of this statement and catched in the catch clause below.
             }
         } catch (InterruptedException | ExecutionException miscEx) {
             throw new ProcessingAbortedException();
@@ -144,16 +167,16 @@ public class ProcessController implements Runnable {
     }
 
     /**
-     * Asks S_DATA_STORE for the results and sends the results (if any) to the Gui. PicData is compared on request. Finishing this method may take
-     * some time depending the workload.
+     * Asks mPicsProcessor for the results and sends the results (if any) to the Gui. mPicsProcessor does some heavy lifting by comparing all the
+     * 1024 bit hashes from PicData objects created by PicPreProcessor.
      */
     private void sendResultsToGui() throws ProcessingAbortedException {
         List<List<PicData>> result;
 
-        if (!mDuplicatesWithoutExample) result = S_DATA_STORE.getSamePicResultsFromExample(mAllowedDeviation);
-        else result = S_DATA_STORE.getSamePicResultsWithoutExample();
+        if (mUseExamplePath) result = mPicsProcessor.getSamePicResultsFromExample(mAllowedDeviation);
+        else result = mPicsProcessor.getSamePicResultsWithoutExample();
 
-        Gui.setTree(result, !mDuplicatesWithoutExample);
+        Gui.setTree(result, mUseExamplePath);
     }
 
     /**
@@ -173,7 +196,7 @@ public class ProcessController implements Runnable {
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     if (!Gui.isProcessingActivated()) throw new TraversingNotAllowedException();
                     String[] fileNameSplit = file.toString().split("\\.");
-                    if (sAcceptedFileExtensions.contains(fileNameSplit[fileNameSplit.length - 1])) picPathList.add(file);
+                    if (sAcceptedFileExtensions.contains(fileNameSplit[fileNameSplit.length - 1].toLowerCase())) picPathList.add(file);
                     return FileVisitResult.CONTINUE;
                 }
 
@@ -191,13 +214,10 @@ public class ProcessController implements Runnable {
                     return FileVisitResult.CONTINUE;
                 }
             });
-        } catch (TraversingNotAllowedException psEx) {
-            throw new ProcessingAbortedException();
         } catch (IOException e) {
-            throw new ProcessingAbortedException(); // TODO Inform user about IOException in a under friendly way.
+            throw new ProcessingAbortedException();
         }
 
-        System.out.println("List contains a Path as null : " + picPathList.contains(null));
         return picPathList;
     }
 }
