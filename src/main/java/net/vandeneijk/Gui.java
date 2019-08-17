@@ -32,8 +32,11 @@ import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.text.TextAlignment;
-import javafx.stage.*;
 import javafx.scene.Cursor;
+import javafx.stage.DirectoryChooser;
+import javafx.stage.FileChooser;
+import javafx.stage.Stage;
+import javafx.stage.WindowEvent;
 import java.io.*;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -41,6 +44,8 @@ import java.util.*;
 import java.awt.*;
 import java.net.MalformedURLException;
 import java.util.List;
+import java.io.File;
+
 
 
 public class Gui extends Application {
@@ -49,7 +54,7 @@ public class Gui extends Application {
     private static final double SCENE_WIDTH = 1024;
     private static final double TEXT_FIELD_HEIGHT = 25;
     private static final double DEFAULT_H_GAP = 10;
-    private static final double DEFAULT_INSERTS = 10;
+    private static final int DEFAULT_INSERTS = 10;
 
 
     // Variables related directly to the nodes for the main GUI.
@@ -113,7 +118,7 @@ public class Gui extends Application {
      * GUI setup in this method. The layout of this method is roughly from small/child objects to larger/parent objects.
      * @param primaryStage
      */
-    public void start(Stage primaryStage) {
+public void start(Stage primaryStage) {
         // --------------------------------------------------------------------
         // Default GUI values.
 
@@ -505,10 +510,10 @@ public class Gui extends Application {
                 mDialogStage.setScene(dialogScene);
                 mDialogStage.resizableProperty().setValue(Boolean.FALSE);
                 mDialogStage.show();
-                mDialogStage.setOnHiding(new EventHandler<WindowEvent>() {
+                mDialogStage.setOnHidden(new EventHandler<WindowEvent>() {
                     @Override
                     public void handle(WindowEvent event) {
-                        disablePrimaryGui(false);
+
                     }
                 });
             }
