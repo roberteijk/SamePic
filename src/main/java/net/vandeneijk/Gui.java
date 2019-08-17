@@ -6,6 +6,7 @@
 
 package net.vandeneijk;
 
+
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
@@ -15,6 +16,7 @@ import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
+import javafx.scene.Cursor;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
@@ -23,7 +25,6 @@ import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
-import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -32,21 +33,24 @@ import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.text.TextAlignment;
-import javafx.scene.Cursor;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
-import java.io.*;
+import javafx.scene.image.Image;
+
+
+import java.util.List;
+import java.awt.*;
+import java.io.File;
+import java.io.IOException;
+import java.net.MalformedURLException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
-import java.awt.*;
-import java.net.MalformedURLException;
-import java.util.List;
-import java.io.File;
-
-
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TreeMap;
 
 public class Gui extends Application {
 
@@ -118,7 +122,7 @@ public class Gui extends Application {
      * GUI setup in this method. The layout of this method is roughly from small/child objects to larger/parent objects.
      * @param primaryStage
      */
-public void start(Stage primaryStage) {
+    public void start(Stage primaryStage) {
         // --------------------------------------------------------------------
         // Default GUI values.
 
@@ -685,7 +689,7 @@ public void start(Stage primaryStage) {
 
         sPrimaryScene = new Scene(primaryStack,SCENE_WIDTH,SCENE_HEIGHT);
 
-        primaryStage.setTitle("SamePic v.1.0.0");
+        primaryStage.setTitle("SamePic v.1.0.1");
         primaryStage.getIcons().add(new Image("icons/SamePic48.png"));
         primaryStage.setScene(sPrimaryScene);
         primaryStage.sizeToScene();
@@ -944,7 +948,7 @@ public void start(Stage primaryStage) {
      * @return
      */
     private GridPane getThumbnail(Image image, boolean selectedPic, boolean examplePic, PicData picData) {
-        ImageView ivImage = new ImageView(image);
+        ImageView ivImage = new ImageView(String.valueOf(image));
 
         StackPane stack = new StackPane();
         stack.getChildren().add(ivImage);
